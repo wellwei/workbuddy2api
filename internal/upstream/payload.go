@@ -68,6 +68,8 @@ func PrepareBodyOptWithEffortsAndDefault(src []byte, sanitize bool, efforts map[
 	if msgs, ok := obj["messages"].([]any); ok {
 		msgs, _ = repackToolResultBlocks(msgs)
 		msgs, _ = cleanupOrphanToolCalls(msgs)
+		// 图片 part 归一化（在配对清理之后：先让结构合法，再改形态）。
+		msgs, _ = normalizeImageParts(msgs)
 		// 无改动时两步都返回原 slice，这里回写等于零操作；任一步重排/删除
 		// （哪怕后续步骤零改动）也必须落到 obj——不能只在「最后一步改动」时回写，
 		// 否则 repack 单独生效的结果会被原 slice 覆盖丢失。
@@ -192,6 +194,47 @@ func normalizeReasoningEffort(obj map[string]any, efforts map[string][]string) {
 		obj[key] = lowest
 		log.Printf("WARN: [upstream] reasoning_effort floored model=%s %s -> %s", model, reqStr, lowest)
 	}
+}
+
+// normalizeImageParts 把非规范形态的 image_url part 归一为 chat 规范形态
+// （`image_url` 是 {"url": "..."} 对象）。
+//
+// 背景：上游只认对象形态，收到字符串即 HTTP 400 code=11101
+// 「invalid image_url content at index N: cannot unmarshal string into Go value of
+// type ImageContent」。而字符串形态是我们自己**上游链路**引入的：new-api 的
+// responses→chat 转换器（relayconvert/internal/oai_responses/to_oai_chat_req.go
+// 的 responsesImagePartToChatImageURL）把入站 input_image.image_url 为字符串时
+// 原样透传。于是 responses 客户端带图必失败，chat 客户端不受影响（自己就传对象）。
+// 同一个 400 在 cline2api 侧以同样方式兜底，两网关口径一致。
+//
+// 只做形态包装，不改 URL 内容；已是对象、无 image_url 字段、非数组 content 一律原样保留
+// （video_url 无需处理——chat 规范里它本就是字符串，上游也照此收）。
+func normalizeImageParts(msgs []any) ([]any, bool) {
+	changed := false
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		parts, ok := mm["content"].([]any)
+		if !ok {
+			continue
+		}
+		for _, p := range parts {
+			pp, ok := p.(map[string]any)
+			if !ok {
+				continue
+			}
+			if t, _ := pp["type"].(string); t != "image_url" {
+				continue
+			}
+			if s, ok := pp["image_url"].(string); ok && s != "" {
+				pp["image_url"] = map[string]any{"url": s}
+				changed = true
+			}
+		}
+	}
+	return msgs, changed
 }
 
 // normalizeRoles 把 messages 里的 developer 角色归一为 system。
