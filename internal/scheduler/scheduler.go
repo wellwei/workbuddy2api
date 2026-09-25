@@ -1,4 +1,4 @@
-// Package scheduler 定时任务：签到 / 活跃上报 / 猫猫旅行 / token keepalive / 开学季 / 夜猫子 六类独立排程。
+// Package scheduler 定时任务：签到 / 活跃上报 / 猫猫旅行 / token keepalive / 开学季 / 夜猫子 / 积分基数对账 七类独立排程。
 // 签到成功后重新查余额，余额 > 0 的冷却账号自动解冻。
 package scheduler
 
@@ -18,7 +18,7 @@ import (
 
 // Config 调度器依赖。
 //
-// 任务开关用「禁用」命名而非「启用」：零值 Config 即六类任务都启用（hours 回落默认），
+// 任务开关用「禁用」命名而非「启用」：零值 Config 即七类任务都启用（hours 回落默认），
 // 与引入开关前的行为逐字一致（老调用方/老测试无需改动）。
 type Config struct {
 	Pool           *pool.Pool
@@ -29,6 +29,9 @@ type Config struct {
 	KeepaliveHours []int // 默认 [22]
 	SchoolHours    []int // 默认 [12]：开学季任务（迁移自系统 crontab）
 	CatHours       []int // 默认 [1]：夜猫子任务（迁移自系统 crontab）
+	// CreditRefreshHours 积分基数对账时点：默认 [2,6,10,14,18,22]（每 4 小时，与签到 9/21 错峰）。
+	// global 账号无签到体系（CheckinAll 的 D4 门控跳过），本任务是它唯一的权威余额刷新来源。
+	CreditRefreshHours []int
 	// ActivityReportCount 每号每次活跃上报的条数：领猫前置需 5 次对话，
 	// 默认 5 条同一 conversationId 内多轮上报把 chat_5 刷满；0/缺省=1 兼容旧行为。
 	ActivityReportCount int
@@ -51,6 +54,8 @@ type Config struct {
 	SchoolDisabled bool
 	// CatDisabled 显式关闭夜猫子任务排程（schedule.cat_enabled=false）。
 	CatDisabled bool
+	// CreditRefreshDisabled 显式关闭积分基数对账排程（schedule.credit_refresh_enabled=false）。
+	CreditRefreshDisabled bool
 }
 
 // Scheduler 调度器。
@@ -91,6 +96,9 @@ func New(cfg Config) *Scheduler {
 	}
 	if len(cfg.CatHours) == 0 {
 		cfg.CatHours = []int{1}
+	}
+	if len(cfg.CreditRefreshHours) == 0 {
+		cfg.CreditRefreshHours = []int{2, 6, 10, 14, 18, 22}
 	}
 	// 0/缺省 = 1 条（兼容旧行为：每号每天 1 条上报点亮连登）。
 	if cfg.ActivityReportCount <= 0 {
@@ -150,6 +158,7 @@ const (
 	taskKeepalive
 	taskSchool
 	taskCat
+	taskCreditRefresh
 )
 
 // nextWake 返回 now 之后最近的唤醒时刻，以及该时刻需要执行的全部任务。
@@ -178,6 +187,9 @@ func (s *Scheduler) nextWake(now time.Time) (time.Time, []taskKind) {
 	}
 	if !s.cfg.CatDisabled {
 		slots = append(slots, slot{nextFire(now, s.cfg.CatHours), taskCat})
+	}
+	if !s.cfg.CreditRefreshDisabled {
+		slots = append(slots, slot{nextFire(now, s.cfg.CreditRefreshHours), taskCreditRefresh})
 	}
 	var earliest time.Time
 	for _, sl := range slots {
@@ -228,7 +240,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 	for {
 		next, kinds := s.nextWake(time.Now())
 		if next.IsZero() {
-			// 六类任务全部禁用：不空转，只等退出信号。
+			// 七类任务全部禁用：不空转，只等退出信号。
 			<-ctx.Done()
 			return
 		}
@@ -285,6 +297,8 @@ func (s *Scheduler) dispatch(ctx context.Context, k taskKind) {
 		s.RunSchoolNow()
 	case taskCat:
 		s.RunCatNow()
+	case taskCreditRefresh:
+		s.RunCreditRefreshNow()
 	}
 }
 

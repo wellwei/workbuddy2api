@@ -30,6 +30,19 @@ func TestDefaultScheduleActivityCount(t *testing.T) {
 	if !s.SchoolEnabled || !s.CatEnabled {
 		t.Errorf("school/cat switches must default true: %+v", s)
 	}
+	if !s.CreditRefreshEnabled {
+		t.Errorf("credit_refresh switch must default true: %+v", s)
+	}
+	wantCredit := []int{2, 6, 10, 14, 18, 22}
+	if len(s.CreditRefreshHours) != len(wantCredit) {
+		t.Fatalf("credit_refresh_hours=%v want %v", s.CreditRefreshHours, wantCredit)
+	}
+	for i, h := range wantCredit {
+		if s.CreditRefreshHours[i] != h {
+			t.Errorf("credit_refresh_hours=%v want %v", s.CreditRefreshHours, wantCredit)
+			break
+		}
+	}
 }
 
 // TestNormalizeScheduleThreeStates 缺省/显式 0/显式 N 三态默认值：
@@ -84,13 +97,16 @@ func TestNormalizeScheduleEmptyHoursFallback(t *testing.T) {
 	if len(s.CatHours) != 1 || s.CatHours[0] != 1 {
 		t.Errorf("cat_hours=%v want [1]", s.CatHours)
 	}
+	if len(s.CreditRefreshHours) != 6 || s.CreditRefreshHours[0] != 2 {
+		t.Errorf("credit_refresh_hours=%v want [2 6 10 14 18 22]", s.CreditRefreshHours)
+	}
 }
 
 // TestNormalizeScheduleInvalidHour 非法小时快速失败并指向正确开关。
 func TestNormalizeScheduleInvalidHour(t *testing.T) {
 	cases := []struct {
-		s           Schedule
-		wantSwitch  string
+		s          Schedule
+		wantSwitch string
 	}{
 		{Schedule{CheckinHours: []int{25}}, "checkin_enabled"},
 		{Schedule{CheckinHours: []int{-1}}, "checkin_enabled"},
@@ -101,6 +117,8 @@ func TestNormalizeScheduleInvalidHour(t *testing.T) {
 		{Schedule{SchoolHours: []int{-1}}, "school_enabled"},
 		{Schedule{CatHours: []int{24}}, "cat_enabled"},
 		{Schedule{CatHours: []int{-1}}, "cat_enabled"},
+		{Schedule{CreditRefreshHours: []int{24}}, "credit_refresh_enabled"},
+		{Schedule{CreditRefreshHours: []int{-1}}, "credit_refresh_enabled"},
 	}
 	for _, tc := range cases {
 		err := tc.s.Normalize()

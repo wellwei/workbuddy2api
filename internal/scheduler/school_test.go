@@ -88,14 +88,15 @@ func TestNextWakeCatSlot(t *testing.T) {
 // TestNextWakeSchoolCatDisabled 显式禁用 school/cat 后排程只剩签到时点（互不影响）。
 func TestNextWakeSchoolCatDisabled(t *testing.T) {
 	s := New(Config{
-		CheckinHours:      []int{21},
-		TravelDisabled:    true,
-		ActivityDisabled:  true,
-		KeepaliveDisabled: true,
-		SchoolHours:       []int{12},
-		CatHours:          []int{1},
-		SchoolDisabled:    true,
-		CatDisabled:       true,
+		CheckinHours:          []int{21},
+		TravelDisabled:        true,
+		ActivityDisabled:      true,
+		KeepaliveDisabled:     true,
+		SchoolHours:           []int{12},
+		CatHours:              []int{1},
+		SchoolDisabled:        true,
+		CatDisabled:           true,
+		CreditRefreshDisabled: true,
 	})
 	at, kinds := s.nextWake(time.Date(2026, 9, 14, 8, 0, 0, 0, time.Local))
 	if want := time.Date(2026, 9, 14, 21, 0, 0, 0, time.Local); !at.Equal(want) {

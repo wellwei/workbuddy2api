@@ -145,22 +145,24 @@ func main() {
 	up.GlobalEnabled = cfg.Global.Enabled
 
 	sch := scheduler.New(scheduler.Config{
-		Pool:                p,
-		Upstream:            up,
-		CheckinHours:        cfg.Schedule.CheckinHours,
-		TravelHours:         cfg.Schedule.TravelHours,
-		ActivityHours:       cfg.Schedule.ActivityHours,
-		KeepaliveHours:      cfg.Schedule.KeepaliveHours,
-		SchoolHours:         cfg.Schedule.SchoolHours,
-		CatHours:            cfg.Schedule.CatHours,
-		ActivityReportCount: cfg.Schedule.ActivityReportCount,
-		ExpiringSoonWindow:  cfg.ExpiringSoonDur, // 快过期积分优先消耗（issue:积分过期）
-		CheckinDisabled:     !cfg.Schedule.CheckinEnabled,
-		TravelDisabled:      !cfg.Schedule.TravelEnabled,
-		ActivityDisabled:    !cfg.Schedule.ActivityEnabled,
-		KeepaliveDisabled:   !cfg.Schedule.KeepaliveEnabled,
-		SchoolDisabled:      !cfg.Schedule.SchoolEnabled,
-		CatDisabled:         !cfg.Schedule.CatEnabled,
+		Pool:                  p,
+		Upstream:              up,
+		CheckinHours:          cfg.Schedule.CheckinHours,
+		TravelHours:           cfg.Schedule.TravelHours,
+		ActivityHours:         cfg.Schedule.ActivityHours,
+		KeepaliveHours:        cfg.Schedule.KeepaliveHours,
+		SchoolHours:           cfg.Schedule.SchoolHours,
+		CatHours:              cfg.Schedule.CatHours,
+		CreditRefreshHours:    cfg.Schedule.CreditRefreshHours,
+		ActivityReportCount:   cfg.Schedule.ActivityReportCount,
+		ExpiringSoonWindow:    cfg.ExpiringSoonDur, // 快过期积分优先消耗（issue:积分过期）
+		CheckinDisabled:       !cfg.Schedule.CheckinEnabled,
+		TravelDisabled:        !cfg.Schedule.TravelEnabled,
+		ActivityDisabled:      !cfg.Schedule.ActivityEnabled,
+		KeepaliveDisabled:     !cfg.Schedule.KeepaliveEnabled,
+		SchoolDisabled:        !cfg.Schedule.SchoolEnabled,
+		CatDisabled:           !cfg.Schedule.CatEnabled,
+		CreditRefreshDisabled: !cfg.Schedule.CreditRefreshEnabled,
 	})
 	switch {
 	case !cfg.Schedule.CheckinEnabled:
@@ -194,6 +196,11 @@ func main() {
 		log.Printf("夜猫子任务已禁用（schedule.cat_enabled=false）")
 	} else {
 		log.Printf("夜猫子任务已启用：%v 点（task_runner.py ALL --yes --only black_cat）", cfg.Schedule.CatHours)
+	}
+	if !cfg.Schedule.CreditRefreshEnabled {
+		log.Printf("积分基数对账已禁用（schedule.credit_refresh_enabled=false）")
+	} else {
+		log.Printf("积分基数对账已启用：%v 点（全量账号权威余额刷新 + 余额恢复解冻，global 账号唯一权威来源）", cfg.Schedule.CreditRefreshHours)
 	}
 
 	h := server.NewHandler(server.Config{

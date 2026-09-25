@@ -10,7 +10,7 @@ import "fmt"
 
 // Schedule 排程配置段（对应 config.json 的 "schedule" 对象）。
 //
-// 六类独立排程：签到 / 活跃上报 / 猫猫旅行 / token keepalive / 开学季 / 夜猫子。
+// 七类独立排程：签到 / 活跃上报 / 猫猫旅行 / token keepalive / 开学季 / 夜猫子 / 积分基数对账。
 // cmd/server 与 cmd/activity 共用本结构，默认值由 DefaultSchedule 填充、
 // 缺省归一由 Normalize 完成——两命令走同一份语义，不再各自复制。
 type Schedule struct {
@@ -20,6 +20,10 @@ type Schedule struct {
 	KeepaliveHours []int `json:"keepalive_hours"` // [22]
 	SchoolHours    []int `json:"school_hours"`    // [12] 开学季任务（迁移自 school/cat 两条系统 crontab）
 	CatHours       []int `json:"cat_hours"`       // [1] 夜猫窗口 23-08 CST，01:00 窗口内补 1 次
+	// CreditRefreshHours 积分基数对账时点：全量账号（CN + global）查权威余额并回写
+	// pool，余额恢复的冷却账号解冻。global 账号无签到体系，这是它唯一的权威余额
+	// 刷新来源；默认 [2,6,10,14,18,22] 每 4 小时一次，与签到（9/21）错峰。
+	CreditRefreshHours []int `json:"credit_refresh_hours"` // [2,6,10,14,18,22]
 	// CheckinEnabled/TravelEnabled/ActivityEnabled/KeepaliveEnabled/SchoolEnabled/CatEnabled
 	// 显式禁用开关（缺省 true）。
 	//
@@ -29,12 +33,13 @@ type Schedule struct {
 	//     则对老配置零影响，向后完全兼容。
 	//   - 开关与取值解耦：禁用时仍保留用户显式配的小时，重新启用无需补配。
 	//   - 无需猜测哨兵（[-1] 之类），非法小时一律报错并提示改用本开关。
-	CheckinEnabled   bool `json:"checkin_enabled"`   // 缺省 true；false = 关签到
-	TravelEnabled    bool `json:"travel_enabled"`    // 缺省 true；false = 完全停猫猫旅行
-	ActivityEnabled  bool `json:"activity_enabled"`  // 缺省 true；false = 停活跃上报
-	KeepaliveEnabled bool `json:"keepalive_enabled"` // 缺省 true；false = 关 token 保活
-	SchoolEnabled    bool `json:"school_enabled"`    // 缺省 true；false = 停开学季任务
-	CatEnabled       bool `json:"cat_enabled"`       // 缺省 true；false = 停夜猫子任务
+	CheckinEnabled       bool `json:"checkin_enabled"`        // 缺省 true；false = 关签到
+	TravelEnabled        bool `json:"travel_enabled"`         // 缺省 true；false = 完全停猫猫旅行
+	ActivityEnabled      bool `json:"activity_enabled"`       // 缺省 true；false = 停活跃上报
+	KeepaliveEnabled     bool `json:"keepalive_enabled"`      // 缺省 true；false = 关 token 保活
+	SchoolEnabled        bool `json:"school_enabled"`         // 缺省 true；false = 停开学季任务
+	CatEnabled           bool `json:"cat_enabled"`            // 缺省 true；false = 停夜猫子任务
+	CreditRefreshEnabled bool `json:"credit_refresh_enabled"` // 缺省 true；false = 停积分基数对账
 	// ActivityReportCount 每号每次活跃上报的条数：领猫前置需 5 次对话，
 	// 默认 5 条把 chat_5 刷满；0/缺省=1 兼容旧行为。
 	ActivityReportCount int `json:"activity_report_count"`
@@ -49,19 +54,21 @@ type Schedule struct {
 // ActivityReportCount 默认 5：领猫前置需 5 次对话，5 连发刷满 chat_5。
 func DefaultSchedule() Schedule {
 	return Schedule{
-		CheckinHours:        []int{9, 21},
-		TravelHours:         []int{9, 21},
-		ActivityHours:       []int{10},
+		CheckinHours:         []int{9, 21},
+		TravelHours:          []int{9, 21},
+		ActivityHours:        []int{10},
 		KeepaliveHours:       []int{22},
 		SchoolHours:          []int{12},
 		CatHours:             []int{1},
-		CheckinEnabled:      true,
-		TravelEnabled:       true,
-		ActivityEnabled:     true,
-		KeepaliveEnabled:    true,
-		SchoolEnabled:       true,
-		CatEnabled:          true,
-		ActivityReportCount: 5, // 领猫前置需 5 次对话，5 连发刷满 chat_5
+		CreditRefreshHours:   []int{2, 6, 10, 14, 18, 22},
+		CheckinEnabled:       true,
+		TravelEnabled:        true,
+		ActivityEnabled:      true,
+		KeepaliveEnabled:     true,
+		SchoolEnabled:        true,
+		CatEnabled:           true,
+		CreditRefreshEnabled: true,
+		ActivityReportCount:  5, // 领猫前置需 5 条对话，5 连发刷满 chat_5
 	}
 }
 
@@ -92,6 +99,9 @@ func (s *Schedule) Normalize() error {
 	if len(s.CatHours) == 0 {
 		s.CatHours = []int{1}
 	}
+	if len(s.CreditRefreshHours) == 0 {
+		s.CreditRefreshHours = []int{2, 6, 10, 14, 18, 22}
+	}
 	// 0/负数 → 1 条（兼容旧行为：每号每天 1 条上报点亮连登）。
 	if s.ActivityReportCount <= 0 {
 		s.ActivityReportCount = 1
@@ -120,7 +130,10 @@ func (s *Schedule) validateHours() error {
 	if err := checkHourRange("schedule.school_hours", "school_enabled", s.SchoolHours); err != nil {
 		return err
 	}
-	return checkHourRange("schedule.cat_hours", "cat_enabled", s.CatHours)
+	if err := checkHourRange("schedule.cat_hours", "cat_enabled", s.CatHours); err != nil {
+		return err
+	}
+	return checkHourRange("schedule.credit_refresh_hours", "credit_refresh_enabled", s.CreditRefreshHours)
 }
 
 func checkHourRange(field, switchKey string, hours []int) error {
