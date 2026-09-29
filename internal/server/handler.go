@@ -51,6 +51,9 @@ type Config struct {
 	// AdminEnabled 运维管理端点开关（config admin.enabled，默认 false）。
 	// 关闭时 /admin/* 一律 404（而非 403——不向外暴露"这里存在管理面"）。
 	AdminEnabled bool
+
+	// MioraBase Miora 图像/视频代理上游地址（空 = 默认 https://public.miora.qq.com）。
+	MioraBase string
 }
 
 // notFoundCooldown 上游 404 的固定短冷却时长。
@@ -85,6 +88,7 @@ type Handler struct {
 	// wafIP WAF IP 级拦截状态机（fail-fast，wafip.go）：短窗多号 WAF 403 →
 	// 激活期轮转遇 WAF 403 直接终止（不放大请求量）。进程内状态、重启清零。
 	wafIP wafIPGate
+	miora mioraState
 }
 
 // NewHandler 构建 handler。
@@ -107,6 +111,11 @@ func NewHandler(cfg Config) *Handler {
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
 	h.mux.HandleFunc("GET /v1/stats", h.withAuth(h.stats))
 	h.mux.HandleFunc("POST /v1/stats/reset", h.withAuth(h.statsReset))
+	h.mux.HandleFunc("POST /api/ai/workbuddy-proxy/image/generate/submit", h.withAuth(h.mioraProxy))
+	h.mux.HandleFunc("POST /api/ai/workbuddy-proxy/image/edit/submit", h.withAuth(h.mioraProxy))
+	h.mux.HandleFunc("POST /api/ai/workbuddy-proxy/image/query-task", h.withAuth(h.mioraProxy))
+	h.mux.HandleFunc("POST /api/ai/workbuddy-proxy/video/submit", h.withAuth(h.mioraProxy))
+	h.mux.HandleFunc("POST /api/ai/workbuddy-proxy/video/query-task", h.withAuth(h.mioraProxy))
 	// 运维管理端点（默认关闭，config admin.enabled 开启后生效）。
 	// 路径用 {uid} 通配而非查询参数：uid 是账号身份，放进路径便于审计与直观。
 	// 条件注册而非 handler 内 404（设计 supplement §2.3）：未注册的路由对未鉴权
